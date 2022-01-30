@@ -1,0 +1,134 @@
+---
+title: "lect2"
+author: "Dantong Zhu"
+date: "2022/1/30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(caret)
+library(FNN) # knn.reg()
+library(doBy) # which.min()
+
+set.seed(2022)
+```
+
+## simulated dataset
+```{r}
+genData <- function(N){
+  X1 <- rnorm(N, mean = 1)
+  X2 <- rnorm(N, mean = 1)
+  eps <- rnorm(N, sd = .5)
+  Y <- sin(X1) + (X2)^2 + eps
+  # Y <- X1 + X2 + eps
+  data.frame(Y = Y, X1 = X1, X2 = X2)
+}
+
+dat <- genData(500)
+```
+
+## Data partition
+```{r}
+indexTrain <- createDataPartition(y = dat$Y, p = 0.8, list = FALSE)
+#将test 和 train data区分； 不返回list，返回matrix；train data分出去80%
+trainData <- dat[indexTrain, ]
+testData <- dat[-indexTrain, ] #-表示exclude
+
+head(trainData)
+```
+
+## Data visualization
+
+featurePlot(), quick check of data
+```{r}
+#创造出theme1之后，可以自由串改性质
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+
+featurePlot(x = trainData[ ,-1], 
+            y = trainData[ ,1], 
+            plot = "scatter", 
+            span = .5, # smotheness
+            labels = c("Predictors","Y"),
+            type = c("p", "smooth"),#不加就没有线
+            layout = c(2, 1))# num of colums and rows
+```
+
+# k-nearest neighbor
+```{r}
+# scatter plot of X2 vs. X; original data
+p <- ggplot(trainData, aes(x = X1, y = X2)) + geom_point() +
+  geom_point(aes(x = 0, y = 0), colour="blue")
+ 
+p 
+
+# find the 5 nearest neighbors of (0,0)， 距离公式
+dist0 <- sqrt((trainData[,2] - 0)^2 +(trainData[,3] - 0)^2)
+neighbor0 <- which.minn(dist0, n = 5)
+
+# visualize the neighbours
+p + geom_point(data = trainData[neighbor0, ], 
+               colour = "red")
+
+mean(trainData[neighbor0,1])#求第一列y的平均值， 相当欲f hat(0,0)， predictive
+```
+
+或者也直接可以用函数knn.reg
+```{r}
+knn.reg(train = trainData[,2:3],
+        test = c(0,0),
+        y = trainData[,1],
+        k = 5)
+```
+
+#Model training
+用cross——validation来选择optimal k，找min value
+```{r}
+kGrid <- expand.grid(k = seq(from = 1, to = 40, by = 1))
+
+set.seed(1)
+fit.knn <- train(Y ~ ., 
+                 data = trainData,
+                 method = "knn",
+                 trControl = trainControl(method = "cv", number = 10), # ten-fold cross-validation
+                 tuneGrid = kGrid)
+
+ggplot(fit.knn)
+```
+
+```{r}
+set.seed(1)
+fit.lm <- train(Y ~ ., 
+                data = trainData,
+                method = "lm",
+                trControl = trainControl(method = "cv", number = 10))
+```
+
+Which is better?
+
+常用mean（cross—validation来计算表示优劣，对比分析发现，knn模型mean更小，更成功）
+```{r}
+rs <- resamples(list(knn = fit.knn, lm = fit.lm))
+#extract something(cross-validation result) to resemble
+
+summary(rs, metric = "RMSE")
+```
+
+# Evaluating the model on the test data
+不能用这个来指导model selection，这只是test结果
+```{r}
+pred.knn <- predict(fit.knn, newdata = testData)
+pred.lm <- predict(fit.lm, newdata = testData)
+
+RMSE(pred.knn, testData[,1])
+RMSE(pred.lm, testData[,1])
+```
